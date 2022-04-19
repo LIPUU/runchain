@@ -24,7 +24,7 @@ pub use tokio::{fs, io::AsyncBufReadExt, sync::mpsc};
 
 pub static KEYS: Lazy<identity::Keypair> = Lazy::new(|| identity::Keypair::generate_ed25519());
 pub static PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(KEYS.public()));
-use crate::protocol::{ChainInfo, MessageEvent};
+use crate::protocol::{ChainInfo, MessageEvent, ResponseBlock};
 
 #[derive(NetworkBehaviour)]
 #[behaviour(event_process = true)]
@@ -32,7 +32,11 @@ pub struct RunChainBehaviour {
     pub floodsub: Floodsub,
     pub mdns: Mdns,
     #[behaviour(ignore)]
-    pub response_sender: mpsc::UnboundedSender<MessageEvent>,
+    pub response_sender_to_main: mpsc::UnboundedSender<MessageEvent>,
+    #[behaviour(ignore)]
+    pub new_block_sender_to_main: mpsc::UnboundedSender<MessageEvent>,
+    #[behaviour(ignore)]
+    pub new_transations_sender: mpsc::UnboundedSender<MessageEvent>,
 }
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
@@ -42,20 +46,38 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
                 match serde_json::from_slice::<MessageEvent>(&msg.data) {
                     Ok(MessageEvent::ChainInfo(chaininfo)) => {
                         println!("💎收到了节点{}的ChainInfo广播", msg.source);
-                        self.report_to_loop(MessageEvent::ChainInfo(chaininfo));
+                        self.report_to_loop_got_info_or_request(MessageEvent::ChainInfo(chaininfo));
+                        return;
                     }
                     Ok(MessageEvent::RequestNewBlocks(requestblock)) => {
                         println!("😆{}节点要求请求新块!", msg.source);
-                        self.report_to_loop(MessageEvent::RequestNewBlocks(requestblock));
+                        self.report_to_loop_got_info_or_request(MessageEvent::RequestNewBlocks(
+                            requestblock,
+                        ));
+                        return;
                     }
-                    Ok(MessageEvent::ResponseBlock(responseblock)) => {
-                        println!("😀收到了{}节点发来的新块!", msg.source);
-                        self.report_to_loop(MessageEvent::ResponseBlock(responseblock));
+
+                    // ResponseBlock
+                    Ok(MessageEvent::ResponseBlock(requestblock)) => {
+                        println!("😆{}节点要求请求新块!", msg.source);
+                        self.report_to_loop_got_new_block(MessageEvent::ResponseBlock(
+                            requestblock,
+                        ));
+                        return;
                     }
+
+                    // 在这里处理新收到的交易请求
+                    Ok(MessageEvent::NewUPINFO(newupinfo)) => {
+                        println!("😆{}节点发来上链请求!", msg.source);
+                        self.report_to_loop_got_new_upinfo(MessageEvent::NewUPINFO(newupinfo));
+                        return;
+                    }
+
                     _ => {
-                        println!("Unexpected message")
+                        println!("Unexpected message");
+                        return;
                     }
-                }
+                };
             }
             _ => (),
         }
@@ -63,8 +85,15 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
 }
 
 impl RunChainBehaviour {
-    fn report_to_loop(&self, message_event: MessageEvent) {
-        self.response_sender.send(message_event).unwrap();
+    fn report_to_loop_got_info_or_request(&self, message_event: MessageEvent) {
+        self.response_sender_to_main.send(message_event).unwrap();
+    }
+    fn report_to_loop_got_new_block(&self, new_block: MessageEvent) {
+        self.new_block_sender_to_main.send(new_block).unwrap();
+    }
+
+    fn report_to_loop_got_new_upinfo(&self, new_block: MessageEvent) {
+        self.new_transations_sender.send(new_block).unwrap();
     }
 }
 // 这个是mdns提供的事件，可以是节点发现事件，也可以是节点过期事件

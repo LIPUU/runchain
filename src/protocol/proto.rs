@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub static TOPICSTRING: Lazy<String> = Lazy::new(|| String::from("RUNCHAINNET"));
 pub static TOPIC: Lazy<Topic> = Lazy::new(|| Topic::new("RUNCHAINNET"));
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum EventMod {
     ALL,
     ONE(String),
@@ -30,7 +30,7 @@ pub struct RequestNewBlocks {
     pub num_of_blocks: usize, // 请求的块的个数
 }
 
-// 向某个请求Block的Peer回应块
+// 向某个请求Block的Peer回应块.这个结构体别人会给我发，我也会给别人回应。
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ResponseBlock {
     pub event_mod: EventMod,
@@ -38,9 +38,18 @@ pub struct ResponseBlock {
     pub blocks: Vec<Block>, // 块
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NewUPINFO {
+    pub upinfo: String,
+    pub signature: Vec<u8>,
+    pub public_key: Vec<u8>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum MessageEvent {
     ChainInfo(ChainInfo),
     RequestNewBlocks(RequestNewBlocks),
     ResponseBlock(ResponseBlock),
+    NewUPINFO(NewUPINFO), // 比如说，发送内容是，明文，通过私钥加密的明文的Hash，以及公钥
+                          // 这样能够保证不会被篡改
 }

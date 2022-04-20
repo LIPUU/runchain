@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // 最终通过计算得到hash，并把计算hash过程中得到的nonce返回
 pub fn pow_v2(block: Block, atomicbool: &AtomicBool) -> (u128, bool) {
     let s = format!(
-        "{}{}{}{}",
+        "{}{:?}{}{:?}",
         block.height, block.previous_hash, block.timestamp, block.merkle_root
     );
 

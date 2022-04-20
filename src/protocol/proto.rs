@@ -1,4 +1,4 @@
-pub const DIFFICULTY_PREFIX: &[u8; 4] = &[0, 0, 0, 0];
+pub const DIFFICULTY_PREFIX: &[u8; 3] = &[0, 0,0];
 use crate::block::Block;
 use libp2p::floodsub::Topic;
 use once_cell::sync::Lazy;
@@ -21,7 +21,7 @@ pub enum EventMod {
 pub struct ChainInfo {
     pub peer_id: String,
     pub topic: String,
-    pub genesis_hash: String,
+    pub genesis_hash: Vec<u8>,
     pub block_height: usize,
 }
 

@@ -9,10 +9,11 @@ use crate::block::Block;
 use p2p::*;
 use protocol::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc,RwLock};
 use std::time::Instant;
 static FLAG: AtomicBool = AtomicBool::new(true);
 use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
+use rand::Rng;
 #[tokio::main]
 async fn main() {
     println!("🔗Peer ID:{}", p2p::PEER_ID.clone());
@@ -81,7 +82,7 @@ async fn main() {
     fn judge_if_time_is_up(t: Instant) -> bool {
         let new_now = std::time::Instant::now();
         if new_now.saturating_duration_since(t) > std::time::Duration::from_secs(3) {
-            println!("时间结束");
+            println!("打包时间结束");
             true
         } else {
             false
@@ -110,7 +111,7 @@ async fn main() {
                 }
             }
 
-            println!("准备打包,当前new_up_infos的长度为:{}", new_up_infos.len());
+            println!("开始验证交易,当前new_up_infos的长度为:{}", new_up_infos.len());
 
             // 此时new_up_infos中可能已经存放了一些upinfos
             // 先挨个做验证，把非法上链信息剔除之后就开始构建默克尔树并计算默克尔根的哈希.
@@ -153,23 +154,25 @@ async fn main() {
             let merkle_root = match merkle_tree.root() {
                 Some(value) => value,
                 None => {
-                    println!("默克尔根计算失败,插入一个默认默克尔根");
-                    [202, 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167, 134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187]
+                    println!("默克尔根计算失败,因为当前没有交易请求，插入一个默认随机默克尔根");
+                    let mut rng = rand::thread_rng();
+                    [rng.gen_range(0, 255), 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167, 134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187]
                 }
             };
 
-            let merkle_root = std::str::from_utf8(&merkle_root).unwrap().to_owned();
-            // 得到默克尔根
 
 
             let blocks = runchain_arc_copy.read().unwrap();
             let main_chain_last_block = blocks.last_block();
+            
             let height = (main_chain_last_block.height + 1) as usize;
+            
             let previous_hash = runchain_arc_copy // 这地方可能会死锁。。？
                 .read()
                 .unwrap()
                 .calculate_hash(main_chain_last_block)
                 .unwrap();
+            drop(blocks);
             let timestamp = format!("{}", Utc::now());
 
             // 打包好块，送去挖矿
@@ -191,6 +194,8 @@ async fn main() {
             } else {
                 // 走到这个分支说明挖出了新块
 
+                println!("挖出了新块");
+
                 // 将block添加到主链上
                 let block = Block {
                     height,
@@ -205,7 +210,11 @@ async fn main() {
                     .unwrap()
                     .try_add_a_block(block)
                     .unwrap();
-                println!("添加块成功，向外广播一下");
+                println!("添加块成功，向外广播。并打印当前链:");
+                let runchain_lock=runchain_arc_copy.read().unwrap();
+                runchain_lock.show_chain();
+                drop(runchain_lock)
+                
             }
         }
     });
@@ -220,6 +229,7 @@ async fn main() {
         let peer_id = PEER_ID.clone().to_string();
         let genesis_hash = runchain_arc_copy_copy.read().unwrap().genesis_hash();
         let block_height = last_block.height;
+        drop(last_block);
         let chain_info = ChainInfo {
             peer_id,
             topic: TOPICSTRING.clone(),
@@ -279,14 +289,21 @@ async fn main() {
                         let partner_peer_id = chaininfo.peer_id.to_string();
                         let my_pper_id = p2p::PEER_ID.to_string();
 
-                        if chaininfo.genesis_hash == runchain.read().unwrap().genesis_hash()
+
+                        let genesis_hash_lock=runchain.read().unwrap();
+                        let genesis_hash=genesis_hash_lock.genesis_hash();
+                        drop(genesis_hash_lock);
+                        if chaininfo.genesis_hash == genesis_hash
                             && chaininfo.topic == TOPICSTRING.to_string()
                         {
-                            if chaininfo.block_height > runchain.read().unwrap().block_height() {
+                            let t=runchain.read().unwrap();
+                            let block_height=t.block_height();
+                            if chaininfo.block_height > block_height {
                                 FLAG.store(false, Ordering::Relaxed); // 立即停止计算线程
 
+
                                 let difference = chaininfo.block_height
-                                    - runchain.read().unwrap().block_height();
+                                    - block_height;
                                 // 向外发送块请求
                                 let request_blocks = RequestNewBlocks {
                                     event_mod: EventMod::ONE((
@@ -362,10 +379,11 @@ async fn main() {
                             println!("是对我请求的新块,我必须作出回应！");
 
                             let numboers_of_block = requestblock.num_of_blocks;
-                            let read_to_send_blocks = runchain_arc_copy_copy
+                            let read_to_send_blocks_lock = runchain_arc_copy_copy
                                 .read()
-                                .unwrap()
-                                .last_n_blocks(numboers_of_block);
+                                .unwrap();
+                            let read_to_send_blocks=read_to_send_blocks_lock.last_n_blocks(numboers_of_block);
+                                
 
                             let response_block = ResponseBlock {
                                 event_mod: EventMod::ONE((
@@ -375,6 +393,7 @@ async fn main() {
                                 num_of_blocks: numboers_of_block,
                                 blocks: read_to_send_blocks,
                             };
+                            drop(read_to_send_blocks_lock);
 
                             // 向别人发送块回应
                             let json = serde_json::to_string(&response_block)

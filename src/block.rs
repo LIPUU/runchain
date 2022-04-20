@@ -8,6 +8,8 @@ use chrono::prelude::*;
 use std::io::Error;
 type Timestamp = String;
 use crate::pow;
+
+#[derive(Clone)]
 pub struct Chain {
     blocks: Vec<Block>,
 }
@@ -49,6 +51,15 @@ impl Chain {
         self.blocks.last().unwrap()
     }
 
+    pub fn last_n_blocks(&self, n: usize) -> Vec<Block> {
+        assert!(n <= self.blocks.len());
+        self.blocks
+            .clone()
+            .into_iter()
+            .skip(self.blocks.len() - n)
+            .collect()
+    }
+
     pub fn is_block_vaild(&self, block: &Block) -> bool {
         let previous_block = self.last_block();
         let previous_block_hash = self.calculate_hash(previous_block).unwrap();
@@ -84,7 +95,7 @@ impl Chain {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Block {
     pub height: usize,
     pub previous_hash: Hash,

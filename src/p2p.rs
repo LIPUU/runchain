@@ -58,10 +58,10 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
                     }
 
                     // ResponseBlock
-                    Ok(MessageEvent::ResponseBlock(requestblock)) => {
-                        println!("😆{}节点要求请求新块!", msg.source);
+                    Ok(MessageEvent::ResponseBlock(response_block)) => {
+                        println!("😆收到了{}节点发来的新块!", msg.source);
                         self.report_to_loop_got_new_block(MessageEvent::ResponseBlock(
-                            requestblock,
+                            response_block,
                         ));
                         return;
                     }

@@ -5,12 +5,12 @@ mod cryptography;
 mod p2p;
 mod pow;
 mod protocol;
-use crate::block::{Block, Chain};
+use crate::block::Block;
 use p2p::*;
 use protocol::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use tokio::sync::mpsc::error::TryRecvError;
+use std::time::Instant;
 static FLAG: AtomicBool = AtomicBool::new(true);
 use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
 #[tokio::main]
@@ -20,10 +20,10 @@ async fn main() {
         mpsc::unbounded_channel::<protocol::MessageEvent>();
 
     let (new_block_sender, mut new_block_receiver) =
-        mpsc::unbounded_channel::<protocol::MessageEvent>();
+        mpsc::unbounded_channel::<(protocol::MessageEvent, String)>();
 
     let (new_transaction_sender, mut new_transaction_receiver) =
-        mpsc::unbounded_channel::<protocol::MessageEvent>();
+        mpsc::unbounded_channel::<(protocol::MessageEvent, String)>();
 
     // Keypair::<X25519Spec>通过X25519Spec来生成DH算法中要用到的密钥对
     // DH算法：https://www.liaoxuefeng.com/wiki/1252599548343744/1304227905273889
@@ -78,43 +78,39 @@ async fn main() {
 
     let mut new_up_infos = vec![];
 
+    fn judge_if_time_is_up(t: Instant) -> bool {
+        let new_now = std::time::Instant::now();
+        if new_now.saturating_duration_since(t) > std::time::Duration::from_secs(3) {
+            println!("时间结束");
+            true
+        } else {
+            false
+        }
+    }
+
     tokio::task::spawn_blocking(move || {
         loop {
             // 在这里组装交易
             // new_transaction_receiver 就是给它用的,反复收上链请求。截止条件是超过几秒或者是交易池满了
             let now = std::time::Instant::now();
-            // while let Ok(MessageEvent::NewUPINFO(new_upinfo)) = new_transaction_receiver.try_recv()
-            // {
-            //     new_up_infos.push(new_upinfo);
-            //     if new_up_infos.len() >= 16 {
-            //         break;
-            //     }
-            //     let new_now = std::time::Instant::now();
-            //     if new_now.saturating_duration_since(now) > std::time::Duration::from_secs(5) {
-            //         break;
-            //     }
-            // }
-
-            let judge_if_time_is_up = || {
-                let new_now = std::time::Instant::now();
-                new_now.saturating_duration_since(now) > std::time::Duration::from_secs(5)
-            };
 
             loop {
                 match new_transaction_receiver.try_recv() {
-                    Ok(MessageEvent::NewUPINFO(new_upinfo)) => {
+                    Ok((MessageEvent::NewUPINFO(new_upinfo), _)) => {
                         new_up_infos.push(new_upinfo);
-                        if new_up_infos.len() >= 16 || judge_if_time_is_up() {
+                        if new_up_infos.len() >= 16 || judge_if_time_is_up(now) {
                             break;
                         }
                     }
                     _ => {
-                        if judge_if_time_is_up() {
+                        if judge_if_time_is_up(now) {
                             break;
                         }
                     }
                 }
             }
+
+            println!("准备打包,当前new_up_infos的长度为:{}", new_up_infos.len());
 
             // 此时new_up_infos中可能已经存放了一些upinfos
             // 先挨个做验证，把非法上链信息剔除之后就开始构建默克尔树并计算默克尔根的哈希.
@@ -153,9 +149,18 @@ async fn main() {
                 .collect();
 
             let merkle_tree = MerkleTree::<Sha256>::from_leaves(&leaves);
-            let merkle_root = merkle_tree.root().unwrap();
-            let merkle_root = std::string::String::from_utf8(merkle_root.to_vec()).unwrap();
+
+            let merkle_root = match merkle_tree.root() {
+                Some(value) => value,
+                None => {
+                    println!("默克尔根计算失败,插入一个默认默克尔根");
+                    [202, 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167, 134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187]
+                }
+            };
+
+            let merkle_root = std::str::from_utf8(&merkle_root).unwrap().to_owned();
             // 得到默克尔根
+
 
             let blocks = runchain_arc_copy.read().unwrap();
             let main_chain_last_block = blocks.last_block();
@@ -209,7 +214,6 @@ async fn main() {
         // 这个为什么报错
         // let t=runchain_arc_copy.read().unwrap();
 
-        // 向外广播一下chaininfo
         let last_block = runchain_arc_copy_copy.read().unwrap();
         let last_block = last_block.last_block();
 
@@ -236,6 +240,7 @@ async fn main() {
 
                 response = response_receiver.recv() =>
                     {
+
                         Some(EventType::MessageEvent(response.expect("can not get MessageEvent")))
                     }
                 _ = swarm.select_next_some() => {
@@ -282,6 +287,7 @@ async fn main() {
 
                                 let difference = chaininfo.block_height
                                     - runchain.read().unwrap().block_height();
+                                // 向外发送块请求
                                 let request_blocks = RequestNewBlocks {
                                     event_mod: EventMod::ONE((
                                         my_pper_id.clone(),
@@ -300,11 +306,15 @@ async fn main() {
                                     chaininfo.peer_id
                                 );
                                 loop {
-                                    let new_block = new_block_receiver.recv().await.unwrap();
+                                    let (new_block, _) = new_block_receiver.recv().await.unwrap();
+
                                     match new_block {
-                                        // 解析别人对我发来的回应块
+                                        // 解析别人对我发来的块回应
                                         MessageEvent::ResponseBlock(resp_block) => {
-                                            if resp_block.event_mod == EventMod::ONE(()) {
+                                            let EventMod::ONE((_, my_peer_id)) =
+                                                resp_block.event_mod;
+
+                                            if my_peer_id == p2p::PEER_ID.to_string() {
                                                 println!("已经拿到新块了!");
 
                                                 // 插入新块
@@ -340,13 +350,15 @@ async fn main() {
                     }
 
                     // 这个是收到了外面某个节点的请求，该节点想要得到本节点的新块
-                    // 所以本分支是向外发新块
+                    // 所以本分支是解析其他节点的请求并向其发新块
                     MessageEvent::RequestNewBlocks(requestblock) => {
                         // 首先检查是否是向本节点请求的新块
                         // 如果是对本节点的请求，就向外发新块
 
-                        // 解析别人对我的请求
-                        if requestblock.event_mod == EventMod::ONE(()) {
+                        let EventMod::ONE((partner_peer_id, my_peer_id)) = requestblock.event_mod;
+
+                        // 解析别人对我的块请求
+                        if my_peer_id == p2p::PEER_ID.to_string() {
                             println!("是对我请求的新块,我必须作出回应！");
 
                             let numboers_of_block = requestblock.num_of_blocks;
@@ -355,14 +367,16 @@ async fn main() {
                                 .unwrap()
                                 .last_n_blocks(numboers_of_block);
 
-                            let peerid = String::from("a"); // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                                                            // 我必须得有对方的peer_id啊我曹!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                             let response_block = ResponseBlock {
-                                event_mod: EventMod::ONE(()),
+                                event_mod: EventMod::ONE((
+                                    p2p::PEER_ID.to_string(),
+                                    partner_peer_id,
+                                )),
                                 num_of_blocks: numboers_of_block,
                                 blocks: read_to_send_blocks,
                             };
 
+                            // 向别人发送块回应
                             let json = serde_json::to_string(&response_block)
                                 .expect("can jsonify chain_info");
                             swarm

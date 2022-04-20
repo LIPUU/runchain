@@ -8,7 +8,6 @@ pub static TOPIC: Lazy<Topic> = Lazy::new(|| Topic::new("RUNCHAINNET"));
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum EventMod {
-    ALL,
     ONE((String, String)),
     // 对于request来说，第一个String是自己的peerid，第二个是对方的peerid
     // 对于Response，第一个String是空，不需要携带，因为Response的时候无需携带自己的，
@@ -52,10 +51,10 @@ pub struct NewUPINFO {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum MessageEvent {
     ChainInfo(ChainInfo),
-    RequestNewBlocks((String, RequestNewBlocks)), // 必须携带请求来源PeerID
-    ResponseBlock((String, ResponseBlock)), // 比如携带向谁回应请求的目标节点的的PeerID
-    NewUPINFO(NewUPINFO), // 比如说，发送内容是，明文，通过私钥加密的明文，以及公钥
-                          // 这样能够保证不会被篡改
+    RequestNewBlocks(RequestNewBlocks), // 必须携带请求来源PeerID
+    ResponseBlock(ResponseBlock),       // 比如携带向谁回应请求的目标节点的的PeerID
+    NewUPINFO(NewUPINFO),               // 比如说，发送内容是，明文，通过私钥加密的明文，以及公钥
+                                        // 这样能够保证不会被篡改
 }
 
 // 有了请求的来源PeerID与回应目标的PeerID,main中的loop就能够完成一些关键性任务

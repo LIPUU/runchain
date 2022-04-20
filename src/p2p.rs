@@ -34,9 +34,9 @@ pub struct RunChainBehaviour {
     #[behaviour(ignore)]
     pub response_sender_to_main: mpsc::UnboundedSender<MessageEvent>,
     #[behaviour(ignore)]
-    pub new_block_sender_to_main: mpsc::UnboundedSender<MessageEvent>,
+    pub new_block_sender_to_main: mpsc::UnboundedSender<(MessageEvent, String)>,
     #[behaviour(ignore)]
-    pub new_transations_sender: mpsc::UnboundedSender<MessageEvent>,
+    pub new_transations_sender: mpsc::UnboundedSender<(MessageEvent, String)>,
 }
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
@@ -60,16 +60,20 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
                     // ResponseBlock
                     Ok(MessageEvent::ResponseBlock(response_block)) => {
                         println!("😆收到了{}节点发来的新块!", msg.source);
-                        self.report_to_loop_got_new_block(MessageEvent::ResponseBlock(
-                            response_block,
-                        ));
+                        self.report_to_loop_got_new_block(
+                            MessageEvent::ResponseBlock(response_block),
+                            msg.source.to_string(),
+                        );
                         return;
                     }
 
                     // 在这里处理新收到的交易请求
                     Ok(MessageEvent::NewUPINFO(newupinfo)) => {
-                        println!("😆{}节点发来上链请求!", msg.source);
-                        self.report_to_loop_got_new_upinfo(MessageEvent::NewUPINFO(newupinfo));
+                        println!("😆钱包节点{}发来上链请求!", msg.source);
+                        self.report_to_loop_got_new_upinfo(
+                            MessageEvent::NewUPINFO(newupinfo),
+                            msg.source.to_string(),
+                        );
                         return;
                     }
 
@@ -88,12 +92,16 @@ impl RunChainBehaviour {
     fn report_to_loop_got_info_or_request(&self, message_event: MessageEvent) {
         self.response_sender_to_main.send(message_event).unwrap();
     }
-    fn report_to_loop_got_new_block(&self, new_block: MessageEvent) {
-        self.new_block_sender_to_main.send(new_block).unwrap();
+    fn report_to_loop_got_new_block(&self, new_block: MessageEvent, source_peer_id: String) {
+        self.new_block_sender_to_main
+            .send((new_block, source_peer_id))
+            .unwrap();
     }
 
-    fn report_to_loop_got_new_upinfo(&self, new_block: MessageEvent) {
-        self.new_transations_sender.send(new_block).unwrap();
+    fn report_to_loop_got_new_upinfo(&self, new_block: MessageEvent, source_peer_id: String) {
+        self.new_transations_sender
+            .send((new_block, source_peer_id))
+            .unwrap();
     }
 }
 // 这个是mdns提供的事件，可以是节点发现事件，也可以是节点过期事件

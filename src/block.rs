@@ -90,7 +90,7 @@ impl Chain {
         let s = s.as_bytes();
         hasher.update(s);
         let v = hasher.finalize().to_vec();
-        let hash = std::str::from_utf8(&v).unwrap();
+        let hash = String::from_utf8(v).unwrap();
         Ok(String::from(hash))
     }
 }

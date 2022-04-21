@@ -18,41 +18,43 @@ pub struct Chain {
 // &[[u8;32]]
 impl Chain {
     pub fn new() -> Self {
-        let first=[Sha256::hash("This is RunChain's first block".as_bytes())];
+        let first = [Sha256::hash("This is RunChain's first block".as_bytes())];
         let merkle_tree = MerkleTree::<Sha256>::from_leaves(&first);
 
         let merkle_root = match merkle_tree.root() {
-                Some(value) => value,
-                None => {
-                    
-                    [202, 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167, 134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187]
-                }
-            };
+            Some(value) => value,
+            None => [
+                202, 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167,
+                134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187,
+            ],
+        };
 
-        let merkle_root:[u8;32] = merkle_root;
+        let merkle_root: [u8; 32] = merkle_root;
 
-        let upinfo=vec![
+        let upinfo = vec![
             format!("{}{}", "Tonight,you are so beautiful. ", Utc::now()),
             format!("{}{}", "I want you more than any other time. ", Utc::now()),
         ];
 
-
         let genesis_block = Block {
             height: 0,
-            previous_hash:vec![202, 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167, 134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187],
+            previous_hash: vec![
+                202, 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167,
+                134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187,
+            ],
             timestamp: Utc::now().to_string(),
             merkle_root,
             nonce: 0,
-            upinfo
+            upinfo,
         };
         Chain {
             blocks: vec![genesis_block],
         }
     }
 
-    pub fn show_chain(&self){
-        for item in &self.blocks{
-            println!("💋block:{:?}",item)
+    pub fn show_chain(&self) {
+        for item in &self.blocks {
+            println!("💋block:{:?}", item)
         }
     }
 
@@ -93,12 +95,12 @@ impl Chain {
             return false;
         }
 
-        if &self.calculate_hash(block).unwrap()[..DIFFICULTY_PREFIX.len()]!=DIFFICULTY_PREFIX {
+        if &self.calculate_hash(block).unwrap()[..DIFFICULTY_PREFIX.len()] != DIFFICULTY_PREFIX {
             println!("block with height: {} has invalid difficulty", block.height);
             return false;
         }
 
-        if block.height != previous_block.height+1 {
+        if block.height != previous_block.height + 1 {
             println!("block with height: {} has invalid height", block.height);
             return false;
         }
@@ -123,7 +125,7 @@ pub struct Block {
     pub height: usize,
     pub previous_hash: Vec<u8>,
     pub timestamp: Timestamp,
-    pub merkle_root: [u8;32],
+    pub merkle_root: [u8; 32],
     pub nonce: u128,
     pub upinfo: Vec<String>,
 }

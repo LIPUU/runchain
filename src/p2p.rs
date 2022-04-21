@@ -49,6 +49,7 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
                         self.report_to_loop_got_info_or_request(MessageEvent::ChainInfo(chaininfo));
                         return;
                     }
+                    
                     Ok(MessageEvent::RequestNewBlocks(requestblock)) => {
                         println!("😆{}节点要求请求新块!", msg.source);
                         self.report_to_loop_got_info_or_request(MessageEvent::RequestNewBlocks(
@@ -77,8 +78,11 @@ impl NetworkBehaviourEventProcess<FloodsubEvent> for RunChainBehaviour {
                         return;
                     }
 
-                    _ => {
-                        println!("Unexpected message");
+                    t => {
+                        if t.is_err() {
+                            println!("⛔Unexpected message:{:?}", t);
+                        }
+
                         return;
                     }
                 };
@@ -96,6 +100,7 @@ impl RunChainBehaviour {
         self.new_block_sender_to_main
             .send((new_block, source_peer_id))
             .unwrap();
+        
     }
 
     fn report_to_loop_got_new_upinfo(&self, new_block: MessageEvent, source_peer_id: String) {

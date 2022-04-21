@@ -1,4 +1,5 @@
-pub const DIFFICULTY_PREFIX: &[u8; 3] = &[0, 0,0];
+// pub const DIFFICULTY_PREFIX: &[u8; 2] = &[0, 0];
+pub const DIFFICULTY_PREFIX: &[u8; 3] = &[0, 0, 0];
 use crate::block::Block;
 use libp2p::floodsub::Topic;
 use once_cell::sync::Lazy;
@@ -53,8 +54,8 @@ pub enum MessageEvent {
     ChainInfo(ChainInfo),
     RequestNewBlocks(RequestNewBlocks), // 必须携带请求来源PeerID
     ResponseBlock(ResponseBlock),       // 比如携带向谁回应请求的目标节点的的PeerID
-    NewUPINFO(NewUPINFO),               // 比如说，发送内容是，明文，通过私钥加密的明文，以及公钥
-                                        // 这样能够保证不会被篡改
+    NewUPINFO(NewUPINFO), // 比如说，发送内容是，明文，通过私钥加密的明文，以及公钥 这样能够保证不会被篡改
+    FOO,
 }
 
 // 有了请求的来源PeerID与回应目标的PeerID,main中的loop就能够完成一些关键性任务

@@ -1,5 +1,6 @@
 use chrono::Utc;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 mod block;
 mod cryptography;
 mod p2p;
@@ -9,11 +10,11 @@ use crate::block::Block;
 use p2p::*;
 use protocol::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc,RwLock};
-use std::time::Instant;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 static FLAG: AtomicBool = AtomicBool::new(true);
-use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
 use rand::Rng;
+use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
 #[tokio::main]
 async fn main() {
     println!("🔗Peer ID:{}", p2p::PEER_ID.clone());
@@ -111,7 +112,10 @@ async fn main() {
                 }
             }
 
-            println!("开始验证交易,当前new_up_infos的长度为:{}", new_up_infos.len());
+            println!(
+                "开始验证交易,当前new_up_infos的长度为:{}",
+                new_up_infos.len()
+            );
 
             // 此时new_up_infos中可能已经存放了一些upinfos
             // 先挨个做验证，把非法上链信息剔除之后就开始构建默克尔树并计算默克尔根的哈希.
@@ -156,17 +160,48 @@ async fn main() {
                 None => {
                     println!("默克尔根计算失败,因为当前没有交易请求，插入一个默认随机默克尔根");
                     let mut rng = rand::thread_rng();
-                    [rng.gen_range(0, 255), 151, 129, 18, 202, 27, 189, 202, 250, 194, 49, 179, 154, 35, 220, 77, 167, 134, 239, 248, 20, 124, 78, 114, 185, 128, 119, 133, 175, 238, 72, 187]
+                    [
+                        rng.gen_range(0, 255),
+                        151,
+                        129,
+                        18,
+                        202,
+                        27,
+                        189,
+                        202,
+                        250,
+                        194,
+                        49,
+                        179,
+                        154,
+                        35,
+                        220,
+                        77,
+                        167,
+                        134,
+                        239,
+                        248,
+                        20,
+                        124,
+                        78,
+                        114,
+                        185,
+                        128,
+                        119,
+                        133,
+                        175,
+                        238,
+                        72,
+                        187,
+                    ]
                 }
             };
 
-
-
             let blocks = runchain_arc_copy.read().unwrap();
             let main_chain_last_block = blocks.last_block();
-            
+
             let height = (main_chain_last_block.height + 1) as usize;
-            
+
             let previous_hash = runchain_arc_copy // 这地方可能会死锁。。？
                 .read()
                 .unwrap()
@@ -188,6 +223,7 @@ async fn main() {
             let (nonce, flag) = pow::pow_v2(block, &FLAG);
 
             if !flag {
+                println!("将交易放回内存池");
                 // 把upinfos放回交易池new_up_infos，
                 new_up_infos = verified_up_infos;
                 allow_pow_receiver.blocking_recv();
@@ -211,10 +247,9 @@ async fn main() {
                     .try_add_a_block(block)
                     .unwrap();
                 println!("添加块成功，向外广播。并打印当前链:");
-                let runchain_lock=runchain_arc_copy.read().unwrap();
+                let runchain_lock = runchain_arc_copy.read().unwrap();
                 runchain_lock.show_chain();
                 drop(runchain_lock)
-                
             }
         }
     });
@@ -273,37 +308,42 @@ async fn main() {
         // libp2p从外面接受事件。把事件和数据通过管道发送给main。main只是从管道recv数据。然后通过swarm发出去相应的数据。
         // 但是p2p模块写的好像有问题。接收事件不对。有一个地方注释写的 // ResponseBlock但是实际上期望接收的是requestblock
         // 搞明白那几种block是啥先。看proto.rs中的注释。
-
+        let mut sended = false;
         if let Some(event) = evt {
             match event {
                 EventType::IsTimeToSendChainInfo => {
-                    let chain_info = get_newest_chaininfo();
-                    let json = serde_json::to_string(&chain_info).expect("can jsonify chain_info");
-                    swarm
-                        .behaviour_mut()
-                        .floodsub
-                        .publish(TOPIC.clone(), json.as_bytes());
+                    if !sended {
+                        let chain_info = get_newest_chaininfo();
+                        let chain_info = MessageEvent::ChainInfo(chain_info);
+                        let json =
+                            serde_json::to_string(&chain_info).expect("can jsonify chain_info");
+                        swarm
+                            .behaviour_mut()
+                            .floodsub
+                            .publish(TOPIC.clone(), json.as_bytes());
+                        sended = true;
+                    }
                 }
                 EventType::MessageEvent(message_event) => match message_event {
                     MessageEvent::ChainInfo(chaininfo) => {
+                        println!("🍏🍏处理chaininfo");
                         let partner_peer_id = chaininfo.peer_id.to_string();
                         let my_pper_id = p2p::PEER_ID.to_string();
 
+                        println!("{} {}", chaininfo.topic, TOPICSTRING.to_string());
 
-                        let genesis_hash_lock=runchain.read().unwrap();
-                        let genesis_hash=genesis_hash_lock.genesis_hash();
-                        drop(genesis_hash_lock);
-                        if chaininfo.genesis_hash == genesis_hash
-                            && chaininfo.topic == TOPICSTRING.to_string()
-                        {
-                            let t=runchain.read().unwrap();
-                            let block_height=t.block_height();
+                        if chaininfo.topic == TOPICSTRING.to_string() {
+                            println!("收到了同一个区块链网络中其他节点的chain_info,开始判断对方链是否比我方链长");
+                            let t = runchain.read().unwrap();
+                            let block_height = t.block_height();
                             if chaininfo.block_height > block_height {
+                                println!("对方链比我方链长");
                                 FLAG.store(false, Ordering::Relaxed); // 立即停止计算线程
 
+                                println!("🌱🌱🌱立即停止挖矿，开始合并其他节点的块");
 
-                                let difference = chaininfo.block_height
-                                    - block_height;
+                                let difference = chaininfo.block_height - block_height;
+                                println!("🌱🌱🌱 difference:{difference}  chaininfo.block_height:{}",chaininfo.block_height);
                                 // 向外发送块请求
                                 let request_blocks = RequestNewBlocks {
                                     event_mod: EventMod::ONE((
@@ -312,6 +352,7 @@ async fn main() {
                                     )),
                                     num_of_blocks: difference, // 请求的块的个数
                                 };
+                                let request_blocks = MessageEvent::RequestNewBlocks(request_blocks);
                                 let json = serde_json::to_string(&request_blocks)
                                     .expect("can jsonify response");
                                 swarm
@@ -323,7 +364,21 @@ async fn main() {
                                     chaininfo.peer_id
                                 );
                                 loop {
-                                    let (new_block, _) = new_block_receiver.recv().await.unwrap();
+                                    println!("开始等待");
+                                    let res =
+                                        timeout(Duration::from_secs(3), new_block_receiver.recv());
+                                    let (flag, new_block) = match res.await {
+                                        Err(_) => (false, MessageEvent::FOO),
+                                        Ok(res) => {
+                                            let (messageevent, _) = res.unwrap();
+                                            (true, messageevent)
+                                        }
+                                    };
+
+                                    if !flag {
+                                        println!("没等到");
+                                        break;
+                                    }
 
                                     match new_block {
                                         // 解析别人对我发来的块回应
@@ -332,8 +387,6 @@ async fn main() {
                                                 resp_block.event_mod;
 
                                             if my_peer_id == p2p::PEER_ID.to_string() {
-                                                println!("已经拿到新块了!");
-
                                                 // 插入新块
                                                 let new_blocks = resp_block.blocks;
                                                 for block in new_blocks.into_iter() {
@@ -344,24 +397,14 @@ async fn main() {
                                                         .unwrap()
                                                 }
                                                 allow_pow_sender.send(true).await.unwrap(); //将状态归位,允许挖矿
+                                                println!("🔥🔥🔥已经拿到新块了!重新开始挖矿");
                                                 break;
                                             }
                                         }
                                         _ => {}
                                     }
+                                    break;
                                 }
-                            } else {
-                                println!(
-                                    "{}的链并不比我方链长,向外广播一发我的链最新信息",
-                                    chaininfo.peer_id
-                                );
-                                let chain_info = get_newest_chaininfo();
-                                let json = serde_json::to_string(&chain_info)
-                                    .expect("can jsonify chain_info");
-                                swarm
-                                    .behaviour_mut()
-                                    .floodsub
-                                    .publish(TOPIC.clone(), json.as_bytes());
                             }
                         }
                     }
@@ -379,11 +422,9 @@ async fn main() {
                             println!("是对我请求的新块,我必须作出回应！");
 
                             let numboers_of_block = requestblock.num_of_blocks;
-                            let read_to_send_blocks_lock = runchain_arc_copy_copy
-                                .read()
-                                .unwrap();
-                            let read_to_send_blocks=read_to_send_blocks_lock.last_n_blocks(numboers_of_block);
-                                
+                            let read_to_send_blocks_lock = runchain_arc_copy_copy.read().unwrap();
+                            let read_to_send_blocks =
+                                read_to_send_blocks_lock.last_n_blocks(numboers_of_block);
 
                             let response_block = ResponseBlock {
                                 event_mod: EventMod::ONE((
@@ -393,7 +434,9 @@ async fn main() {
                                 num_of_blocks: numboers_of_block,
                                 blocks: read_to_send_blocks,
                             };
-                            drop(read_to_send_blocks_lock);
+                            let response_block = MessageEvent::ResponseBlock(response_block);
+
+                            println!("👾👾👾{:?}",response_block);
 
                             // 向别人发送块回应
                             let json = serde_json::to_string(&response_block)
@@ -402,11 +445,13 @@ async fn main() {
                                 .behaviour_mut()
                                 .floodsub
                                 .publish(TOPIC.clone(), json.as_bytes());
+                            println!("已经向外发送了块");
                         }
                     }
 
                     _ => {
                         let chain_info = get_newest_chaininfo();
+                        let chain_info = MessageEvent::ChainInfo(chain_info);
                         let json =
                             serde_json::to_string(&chain_info).expect("can jsonify chain_info");
                         swarm

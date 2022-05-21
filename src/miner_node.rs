@@ -1,20 +1,25 @@
 use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+
 mod block;
 mod cryptography;
 mod p2p;
 mod pow;
 mod protocol;
+
 use crate::block::Block;
 use p2p::*;
 use protocol::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+
 static FLAG: AtomicBool = AtomicBool::new(true);
+
 use rand::Rng;
 use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree};
+
 #[tokio::main]
 async fn main() {
     println!("🔗Peer ID:{}", p2p::PEER_ID.clone());
@@ -31,7 +36,7 @@ async fn main() {
     // DH算法：https://www.liaoxuefeng.com/wiki/1252599548343744/1304227905273889
     let auth_keys = Keypair::<X25519Spec>::new()
         .into_authentic(&KEYS)
-        // 好像是用自己的私钥和对方的公钥协商得到一个最终的对称密钥，用该对称密钥进行后续的加密传输
+        // 用自己的私钥和对方的公钥协商得到一个最终的对称密钥，用该对称密钥进行后续的加密传输
         .expect("can create auth keys");
     let transp = TokioTcpConfig::new()
         .upgrade(upgrade::Version::V1)
@@ -64,7 +69,7 @@ async fn main() {
             .parse()
             .expect("can not get a local socket"),
     )
-    .expect("swarm can be started");
+        .expect("swarm can be started");
 
     enum EventType {
         IsTimeToSendChainInfo,
@@ -162,37 +167,7 @@ async fn main() {
                     let mut rng = rand::thread_rng();
                     [
                         rng.gen_range(0, 255),
-                        151,
-                        129,
-                        18,
-                        202,
-                        27,
-                        189,
-                        202,
-                        250,
-                        194,
-                        49,
-                        179,
-                        154,
-                        35,
-                        220,
-                        77,
-                        167,
-                        134,
-                        239,
-                        248,
-                        20,
-                        124,
-                        78,
-                        114,
-                        185,
-                        128,
-                        119,
-                        133,
-                        175,
-                        238,
-                        72,
-                        187,
+                        151,129,18,202,27,189,202,250,194,49,179,154,35,220,77,167,134,239,248,20,124,78,114,185,128,119,133,175,238,72,187,   
                     ]
                 }
             };
@@ -255,9 +230,6 @@ async fn main() {
     });
 
     let get_newest_chaininfo = || {
-        // 这个为什么报错
-        // let t=runchain_arc_copy.read().unwrap();
-
         let last_block = runchain_arc_copy_copy.read().unwrap();
         let last_block = last_block.last_block();
 
@@ -303,11 +275,10 @@ async fn main() {
         // ✔️当其他节点收到这一讯息的时候会立即停止挖矿并验证新块并将其纳入本链，并继续开始挖矿。
         //  ✔️当发现对方链比我方链长的时候，我方如何立即停止挖矿。当完成之后马上开始挖矿。
         //
-        // 这些都太依赖swarm和main的loop之间的管道了
+        // 这些都依赖swarm和main的loop之间的管道
 
         // libp2p从外面接受事件。把事件和数据通过管道发送给main。main只是从管道recv数据。然后通过swarm发出去相应的数据。
-        // 但是p2p模块写的好像有问题。接收事件不对。有一个地方注释写的 // ResponseBlock但是实际上期望接收的是requestblock
-        // 搞明白那几种block是啥先。看proto.rs中的注释。
+        
         let mut sended = false;
         if let Some(event) = evt {
             match event {
@@ -343,7 +314,7 @@ async fn main() {
                                 println!("🌱🌱🌱立即停止挖矿，开始合并其他节点的块");
 
                                 let difference = chaininfo.block_height - block_height;
-                                println!("🌱🌱🌱 difference:{difference}  chaininfo.block_height:{}",chaininfo.block_height);
+                                println!("🌱🌱🌱 difference:{difference}  chaininfo.block_height:{}", chaininfo.block_height);
                                 // 向外发送块请求
                                 let request_blocks = RequestNewBlocks {
                                     event_mod: EventMod::ONE((
@@ -436,7 +407,7 @@ async fn main() {
                             };
                             let response_block = MessageEvent::ResponseBlock(response_block);
 
-                            println!("👾👾👾{:?}",response_block);
+                            println!("👾👾👾{:?}", response_block);
 
                             // 向别人发送块回应
                             let json = serde_json::to_string(&response_block)

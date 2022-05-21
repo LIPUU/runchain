@@ -31,7 +31,7 @@ pub fn pow_v2(block: Block, atomicbool: &AtomicBool) -> (u128, bool) {
     };
 
     (nonce, flag)
-    // 如果计算是因为标志位变成了false，说明是外界不允许继续计算下去了，返回值为false的flag表明该nonce无效
+    // 如果计算是因为标志位变成了false，说明是外界不允许继续计算下去了，返回值的flag设置为false表明该nonce无效
 }
 
 fn hash_add_n(s: &String, nonce: u128) -> Vec<u8> {
